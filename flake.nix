@@ -3,9 +3,15 @@
 
   inputs.llm-agents.url = "github:numtide/llm-agents.nix";
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+  inputs.xs.url = "github:cablehead/xs";
 
   outputs =
-    { nixpkgs, llm-agents, ... }:
+    {
+      nixpkgs,
+      llm-agents,
+      xs,
+      ...
+    }:
     let
       systems = [
         "x86_64-linux"
@@ -14,6 +20,7 @@
       forAllSystems = nixpkgs.lib.genAttrs systems;
       codexModule = import ./modules/codex-remote-control.nix { inherit nixpkgs; };
       t3codeModule = import ./modules/t3code.nix { inherit llm-agents; };
+      xsModule = import ./modules/xs.nix { inherit xs; };
     in
     {
       nixosModules.default = {
@@ -22,11 +29,13 @@
           ./modules/skills.nix
           codexModule
           t3codeModule
+          xsModule
         ];
       };
       nixosModules.codex-remote-control = codexModule;
       nixosModules.t3code = t3codeModule;
       nixosModules.skills = ./modules/skills.nix;
+      nixosModules.xs = xsModule;
 
       formatter = forAllSystems (
         system:
