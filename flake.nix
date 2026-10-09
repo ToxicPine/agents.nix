@@ -2,9 +2,13 @@
   description = "NixOS modules for locally hosted coding agents";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+  inputs.llm-agents = {
+    url = "github:numtide/llm-agents.nix";
+    inputs.nixpkgs.follows = "nixpkgs";
+  };
 
   outputs =
-    { nixpkgs, ... }:
+    { nixpkgs, llm-agents, ... }:
     let
       systems = [
         "x86_64-linux"
@@ -12,10 +16,17 @@
       ];
       forAllSystems = nixpkgs.lib.genAttrs systems;
       codexModule = import ./modules/codex-remote-control.nix { inherit nixpkgs; };
+      t3codeModule = import ./modules/t3code.nix { inherit llm-agents; };
     in
     {
-      nixosModules.default = codexModule;
+      nixosModules.default = {
+        imports = [
+          codexModule
+          t3codeModule
+        ];
+      };
       nixosModules.codex-remote-control = codexModule;
+      nixosModules.t3code = t3codeModule;
 
       formatter = forAllSystems (
         system:
