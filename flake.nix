@@ -1,11 +1,8 @@
 {
   description = "NixOS modules for locally hosted coding agents";
 
-  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-  inputs.llm-agents = {
-    url = "github:numtide/llm-agents.nix";
-    inputs.nixpkgs.follows = "nixpkgs";
-  };
+  inputs.llm-agents.url = "github:numtide/llm-agents.nix";
+  inputs.nixpkgs.follows = "llm-agents/nixpkgs";
 
   outputs =
     { nixpkgs, llm-agents, ... }:
@@ -21,6 +18,7 @@
     {
       nixosModules.default = {
         imports = [
+          ./modules/cache.nix
           codexModule
           t3codeModule
         ];

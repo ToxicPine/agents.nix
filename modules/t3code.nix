@@ -21,10 +21,8 @@ in
 
     package = lib.mkOption {
       type = lib.types.package;
-      default = llm-agents.packages.${pkgs.stdenv.hostPlatform.system}.t3code.override {
-        providerPackages = [ ];
-      };
-      defaultText = lib.literalExpression "agents.nix's pinned llm-agents T3 Code package";
+      default = llm-agents.packages.${pkgs.stdenv.hostPlatform.system}.t3code.unwrapped;
+      defaultText = lib.literalExpression "agents.nix's pinned llm-agents T3 Code CLI package";
       description = "T3 Code package providing the t3 executable. The default package uses agents from the inherited PATH instead of bundling provider CLIs.";
     };
 
