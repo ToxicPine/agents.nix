@@ -2,7 +2,7 @@
   description = "NixOS modules for locally hosted coding agents";
 
   inputs.llm-agents.url = "github:numtide/llm-agents.nix";
-  inputs.nixpkgs.follows = "llm-agents/nixpkgs";
+  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
 
   outputs =
     { nixpkgs, llm-agents, ... }:

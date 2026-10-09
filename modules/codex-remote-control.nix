@@ -22,8 +22,8 @@ in
     package = lib.mkOption {
       type = lib.types.package;
       default = nixpkgs.legacyPackages.${pkgs.stdenv.hostPlatform.system}.codex;
-      defaultText = lib.literalExpression "Codex from agents.nix's pinned Nixpkgs, following llm-agents/nixpkgs";
-      description = "Codex package to run. Defaults to the Nixpkgs version pinned by llm-agents.";
+      defaultText = lib.literalExpression "Codex from agents.nix's independently pinned nixpkgs-unstable";
+      description = "Codex package to run. Defaults to this flake's locked nixpkgs-unstable package.";
     };
 
   };
