@@ -36,7 +36,10 @@ in
       }
     ];
 
-    users.users.${cfg.user}.linger = lib.mkDefault true;
+    users.users.${cfg.user} = {
+      linger = lib.mkDefault true;
+      packages = [ cfg.package ];
+    };
 
     systemd.user.services.codex-daemon = {
       description = lib.mkDefault "Codex app server with SSH and remote control";

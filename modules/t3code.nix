@@ -63,7 +63,10 @@ in
       }
     ];
 
-    users.users.${cfg.user}.linger = lib.mkDefault true;
+    users.users.${cfg.user} = {
+      linger = lib.mkDefault true;
+      packages = [ cfg.package ];
+    };
     networking.firewall.allowedTCPPorts = lib.mkIf cfg.openFirewall [ cfg.port ];
 
     systemd.user.services.t3code = {
