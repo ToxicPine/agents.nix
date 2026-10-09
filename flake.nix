@@ -19,12 +19,14 @@
       nixosModules.default = {
         imports = [
           ./modules/cache.nix
+          ./modules/skills.nix
           codexModule
           t3codeModule
         ];
       };
       nixosModules.codex-remote-control = codexModule;
       nixosModules.t3code = t3codeModule;
+      nixosModules.skills = ./modules/skills.nix;
 
       formatter = forAllSystems (
         system:
