@@ -12,7 +12,12 @@ let
 in
 {
   options.services.xs = {
-    enable = lib.mkEnableOption "a sandboxed cross.stream user service";
+    enable = lib.mkEnableOption "a cross.stream user service";
+    sandbox = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = "Apply systemd sandboxing restrictions to xs.";
+    };
     user = lib.mkOption {
       type = lib.types.str;
       description = "Existing normal user account that runs xs.";
@@ -46,50 +51,54 @@ in
       packages = [ cfg.package ];
     };
     systemd.user.services.xs = {
-      description = "Sandboxed cross.stream store";
+      description = "Cross.stream store";
       wantedBy = [ "default.target" ];
       unitConfig.ConditionUser = cfg.user;
-      enableDefaultPath = false;
-      serviceConfig = lib.mapAttrs (_: lib.mkDefault) {
-        Type = "exec";
-        ExecStart = utils.escapeSystemdExecArgs [
-          (lib.getExe' cfg.package "xs")
-          "serve"
-          "./store"
-          "--expose"
-          "${host}:${toString cfg.port}"
-        ];
-        WorkingDirectory = "%S/xs";
-        StateDirectory = "xs";
-        StateDirectoryMode = "0700";
-        UMask = "0077";
-        Restart = "on-failure";
-        RestartSec = "5s";
-        PrivateUsers = true;
-        PrivateDevices = true;
-        PrivateIPC = true;
-        PrivateTmp = "disconnected";
-        TemporaryFileSystem = "/:ro";
-        BindReadOnlyPaths = [ "/nix/store" ];
-        NoNewPrivileges = true;
-        CapabilityBoundingSet = "";
-        RestrictNamespaces = true;
-        RestrictSUIDSGID = true;
-        RestrictRealtime = true;
-        LockPersonality = true;
-        MemoryDenyWriteExecute = true;
-        SystemCallArchitectures = "native";
-        SystemCallFilter = [
-          "@system-service"
-          "~@privileged @resources @debug kill tkill tgkill rt_sigqueueinfo rt_tgsigqueueinfo pidfd_send_signal"
-        ];
-        SystemCallErrorNumber = "EPERM";
-        RestrictAddressFamilies = [
-          "AF_UNIX"
-          "AF_INET"
-          "AF_INET6"
-        ];
-      };
+      enableDefaultPath = lib.mkDefault false;
+      serviceConfig = lib.mapAttrs (_: lib.mkDefault) (
+        {
+          Type = "exec";
+          ExecStart = utils.escapeSystemdExecArgs [
+            (lib.getExe' cfg.package "xs")
+            "serve"
+            "./store"
+            "--expose"
+            "${host}:${toString cfg.port}"
+          ];
+          WorkingDirectory = "%S/xs";
+          StateDirectory = "xs";
+          Restart = "on-failure";
+          RestartSec = "5s";
+        }
+        // lib.optionalAttrs cfg.sandbox {
+          StateDirectoryMode = "0700";
+          UMask = "0077";
+          PrivateUsers = true;
+          PrivateDevices = true;
+          PrivateIPC = true;
+          PrivateTmp = "disconnected";
+          TemporaryFileSystem = "/:ro";
+          BindReadOnlyPaths = [ "/nix/store" ];
+          NoNewPrivileges = true;
+          CapabilityBoundingSet = "";
+          RestrictNamespaces = true;
+          RestrictSUIDSGID = true;
+          RestrictRealtime = true;
+          LockPersonality = true;
+          MemoryDenyWriteExecute = true;
+          SystemCallArchitectures = "native";
+          SystemCallFilter = [
+            "@system-service"
+            "~@privileged @resources @debug kill tkill tgkill rt_sigqueueinfo rt_tgsigqueueinfo pidfd_send_signal"
+          ];
+          SystemCallErrorNumber = "EPERM";
+          RestrictAddressFamilies = [
+            "AF_UNIX"
+            "AF_INET"
+            "AF_INET6"
+          ];
+        }
+      );
     };
   };
 }
