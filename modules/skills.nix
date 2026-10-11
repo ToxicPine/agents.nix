@@ -227,27 +227,33 @@ in
             name: settings:
             let
               user = config.users.users.${name};
-              links = lib.unique (selections settings);
               script = ''
-                ${lib.concatMapStringsSep "\n" (link: ''
-                  target=${lib.escapeShellArg "${user.home}/${link.name}"}
-                  if [ -e "$target" ] || [ -L "$target" ]; then
-                    if [ -L "$target" ]; then
-                      previous=$(${pkgs.coreutils}/bin/readlink -- "$target")
+                shopt -s nullglob dotglob
+                package=${lib.escapeShellArg settings.package}
+                home=${lib.escapeShellArg user.home}
+                targets=(${lib.escapeShellArgs (targets settings)})
+                for target in "''${targets[@]}"; do
+                  for source in "$package/$target"/*; do
+                    link="$target/''${source##*/}"
+                    destination="$home/$link"
+                    if [ -L "$destination" ]; then
+                      previous=$(${pkgs.coreutils}/bin/readlink -- "$destination")
                       case "$previous" in
-                        ${lib.escapeShellArg builtins.storeDir}/*${lib.escapeShellArg "-${name}-skills/${link.name}"}) ;;
-                        *) printf 'Refusing to replace unmanaged skill: %s\n' "$target" >&2; exit 1 ;;
+                        ${lib.escapeShellArg builtins.storeDir}/*${lib.escapeShellArg "-${name}-skills/"}"$link") ;;
+                        *) printf 'Refusing to replace unmanaged skill: %s\n' "$destination" >&2; exit 1 ;;
                       esac
-                    else
-                      printf 'Refusing to replace unmanaged skill: %s\n' "$target" >&2
+                    elif [ -e "$destination" ]; then
+                      printf 'Refusing to replace unmanaged skill: %s\n' "$destination" >&2
                       exit 1
                     fi
-                  fi
-                '') links}
-                ${lib.concatMapStringsSep "\n" (link: ''
-                  ${pkgs.coreutils}/bin/mkdir -p -- ${lib.escapeShellArg "${user.home}/${builtins.dirOf link.name}"}
-                  ${pkgs.coreutils}/bin/ln -sfnT -- ${lib.escapeShellArg "${settings.package}/${link.name}"} ${lib.escapeShellArg "${user.home}/${link.name}"}
-                '') links}
+                  done
+                done
+                for target in "''${targets[@]}"; do
+                  for source in "$package/$target"/*; do
+                    ${pkgs.coreutils}/bin/mkdir -p -- "$home/$target"
+                    ${pkgs.coreutils}/bin/ln -sfnT -- "$source" "$home/$target/''${source##*/}"
+                  done
+                done
               '';
             in
             lib.optionalString (targets settings != [ ]) ''
