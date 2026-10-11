@@ -18,9 +18,9 @@
         "aarch64-linux"
       ];
       forAllSystems = nixpkgs.lib.genAttrs systems;
-      codexModule = import ./modules/codex-remote-control.nix { inherit nixpkgs; };
-      t3codeModule = import ./modules/t3code.nix { inherit llm-agents; };
-      xsModule = import ./modules/xs.nix { inherit xs; };
+      codexModule = import ./modules/codex { inherit nixpkgs; };
+      t3codeModule = import ./modules/t3code { inherit llm-agents; };
+      xsModule = import ./modules/xs { inherit xs; };
       cliProxyApiModule = import ./modules/cli-proxy-api { inherit llm-agents; };
     in
     {
