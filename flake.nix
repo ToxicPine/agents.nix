@@ -21,6 +21,7 @@
       codexModule = import ./modules/codex-remote-control.nix { inherit nixpkgs; };
       t3codeModule = import ./modules/t3code.nix { inherit llm-agents; };
       xsModule = import ./modules/xs.nix { inherit xs; };
+      cliProxyApiModule = import ./modules/cli-proxy-api { inherit llm-agents; };
     in
     {
       nixosModules.default = {
@@ -30,12 +31,14 @@
           codexModule
           t3codeModule
           xsModule
+          cliProxyApiModule
         ];
       };
       nixosModules.codex-remote-control = codexModule;
       nixosModules.t3code = t3codeModule;
       nixosModules.skills = ./modules/skills.nix;
       nixosModules.xs = xsModule;
+      nixosModules.cli-proxy-api = cliProxyApiModule;
 
       formatter = forAllSystems (
         system:
@@ -47,7 +50,7 @@
           runtimeInputs = [ pkgs.nixfmt ];
           text = ''
             if [ "$#" -eq 0 ]; then
-              exec nixfmt flake.nix modules/*.nix
+              exec nixfmt flake.nix modules/*.nix modules/*/*.nix
             fi
             exec nixfmt "$@"
           '';
