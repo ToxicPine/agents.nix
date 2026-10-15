@@ -2,9 +2,11 @@
   config,
   lib,
   pkgs,
+  options,
   ...
 }:
 let
+  isDarwin = options ? launchd;
   cfg = config.programs.skills;
   relative = lib.types.strMatching "[^/].*";
   safePath =
@@ -127,10 +129,58 @@ let
         assert lib.assertMsg (safePath target) "Invalid programs.skills target: ${target}";
         map (skill: {
           name = "${target}/${skill.name}";
-          path = skill.path;
+          inherit (skill) path;
         }) selected
       ) entry.targets
     ) (entries settings);
+  activationScript = lib.optionalString (cfg.users != { }) ''
+    agent_skills_status=0
+    ${lib.concatStringsSep "\n" (
+      lib.mapAttrsToList (
+        name: settings:
+        let
+          user = config.users.users.${name};
+          script = ''
+            shopt -s nullglob dotglob
+            package=${lib.escapeShellArg settings.package}
+            home=${lib.escapeShellArg user.home}
+            targets=(${lib.escapeShellArgs (targets settings)})
+            for target in "''${targets[@]}"; do
+              for source in "$package/$target"/*; do
+                link="$target/''${source##*/}"
+                destination="$home/$link"
+                if [ -L "$destination" ]; then
+                  previous=$(${pkgs.coreutils}/bin/readlink -- "$destination")
+                  case "$previous" in
+                    ${lib.escapeShellArg builtins.storeDir}/*${lib.escapeShellArg "-${name}-skills/"}"$link") ;;
+                    *) printf 'Refusing to replace unmanaged skill: %s\n' "$destination" >&2; exit 1 ;;
+                  esac
+                elif [ -e "$destination" ]; then
+                  printf 'Refusing to replace unmanaged skill: %s\n' "$destination" >&2
+                  exit 1
+                fi
+              done
+            done
+            for target in "''${targets[@]}"; do
+              for source in "$package/$target"/*; do
+                ${pkgs.coreutils}/bin/mkdir -p -- "$home/$target"
+                ${pkgs.coreutils}/bin/ln -sfnT -- "$source" "$home/$target/''${source##*/}"
+              done
+            done
+          '';
+        in
+        lib.optionalString (targets settings != [ ]) ''
+          ${
+            if pkgs.stdenv.hostPlatform.isDarwin then
+              "/usr/bin/sudo -H -u"
+            else
+              "${pkgs.util-linux}/bin/runuser -u"
+          } ${lib.escapeShellArg user.name} -- ${pkgs.runtimeShell} -euc ${lib.escapeShellArg script} || agent_skills_status=1
+        ''
+      ) cfg.users
+    )}
+    test "$agent_skills_status" -eq 0
+  '';
 in
 {
   options.programs.skills = {
@@ -213,56 +263,29 @@ in
       );
     };
   };
-  config = {
-    assertions = lib.mapAttrsToList (name: settings: {
-      assertion = config.users.users.${name}.isNormalUser or false;
-      message = "programs.skills.users.${name} must name an existing normal user.";
-    }) cfg.users;
-    system.activationScripts.agent-skills = {
-      deps = [ "users" ];
-      text = lib.optionalString (cfg.users != { }) ''
-        agent_skills_status=0
-        ${lib.concatStringsSep "\n" (
-          lib.mapAttrsToList (
-            name: settings:
-            let
-              user = config.users.users.${name};
-              script = ''
-                shopt -s nullglob dotglob
-                package=${lib.escapeShellArg settings.package}
-                home=${lib.escapeShellArg user.home}
-                targets=(${lib.escapeShellArgs (targets settings)})
-                for target in "''${targets[@]}"; do
-                  for source in "$package/$target"/*; do
-                    link="$target/''${source##*/}"
-                    destination="$home/$link"
-                    if [ -L "$destination" ]; then
-                      previous=$(${pkgs.coreutils}/bin/readlink -- "$destination")
-                      case "$previous" in
-                        ${lib.escapeShellArg builtins.storeDir}/*${lib.escapeShellArg "-${name}-skills/"}"$link") ;;
-                        *) printf 'Refusing to replace unmanaged skill: %s\n' "$destination" >&2; exit 1 ;;
-                      esac
-                    elif [ -e "$destination" ]; then
-                      printf 'Refusing to replace unmanaged skill: %s\n' "$destination" >&2
-                      exit 1
-                    fi
-                  done
-                done
-                for target in "''${targets[@]}"; do
-                  for source in "$package/$target"/*; do
-                    ${pkgs.coreutils}/bin/mkdir -p -- "$home/$target"
-                    ${pkgs.coreutils}/bin/ln -sfnT -- "$source" "$home/$target/''${source##*/}"
-                  done
-                done
-              '';
-            in
-            lib.optionalString (targets settings != [ ]) ''
-              ${pkgs.util-linux}/bin/runuser -u ${lib.escapeShellArg user.name} -- ${pkgs.runtimeShell} -euc ${lib.escapeShellArg script} || agent_skills_status=1
-            ''
-          ) cfg.users
-        )}
-        test "$agent_skills_status" -eq 0
-      '';
-    };
-  };
+  config = lib.mkMerge [
+    {
+      assertions = lib.mapAttrsToList (name: _: {
+        assertion =
+          if pkgs.stdenv.hostPlatform.isDarwin then
+            (config.users.users.${name}.home or null) != null
+          else
+            config.users.users.${name}.isNormalUser or false;
+        message = "programs.skills.users.${name} must name an existing normal user.";
+      }) cfg.users;
+    }
+    (
+      if isDarwin then
+        {
+          system.activationScripts.postActivation.text = lib.mkAfter activationScript;
+        }
+      else
+        {
+          system.activationScripts.agent-skills = {
+            deps = [ "users" ];
+            text = activationScript;
+          };
+        }
+    )
+  ];
 }

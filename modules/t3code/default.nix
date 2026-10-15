@@ -3,15 +3,17 @@
   config,
   lib,
   pkgs,
+  options,
   utils,
   ...
 }:
 let
+  isDarwin = options ? launchd;
   cfg = config.services.t3code;
 in
 {
   options.services.t3code = {
-    enable = lib.mkEnableOption "a systemd-supervised headless T3 Code server";
+    enable = lib.mkEnableOption "a supervised headless T3 Code server";
 
     user = lib.mkOption {
       type = lib.types.str;
@@ -47,48 +49,89 @@ in
     };
 
     openFirewall = lib.mkOption {
-      type = lib.types.bool;
-      default = true;
+      type = if pkgs.stdenv.hostPlatform.isDarwin then lib.types.enum [ false ] else lib.types.bool;
+      default =
+        if pkgs.stdenv.hostPlatform.isDarwin then
+          throw "Set services.t3code.openFirewall = false explicitly on macOS."
+        else
+          true;
+      defaultText = lib.literalExpression "true on Linux; explicit false on macOS";
       description = "Allow the configured TCP port on all interfaces. For interface-specific access, configure networking.firewall.interfaces directly.";
     };
   };
 
-  config = lib.mkIf cfg.enable {
-    assertions = [
+  config = lib.mkIf cfg.enable (
+    lib.mkMerge [
       {
-        assertion = cfg.user != "" && config.users.users.${cfg.user}.isNormalUser;
-        message = "services.t3code.user must name an existing normal user account.";
+        assertions = [
+          {
+            assertion = !pkgs.stdenv.hostPlatform.isDarwin || !cfg.openFirewall;
+            message = "services.t3code.openFirewall is only supported on Linux; configure the macOS firewall separately.";
+          }
+          {
+            assertion =
+              cfg.user != ""
+              && (
+                if pkgs.stdenv.hostPlatform.isDarwin then
+                  config.users.users.${cfg.user}.home != null
+                else
+                  config.users.users.${cfg.user}.isNormalUser
+              );
+            message = "services.t3code.user must name an existing normal user account.";
+          }
+        ];
+
       }
-    ];
+      (
+        if !isDarwin then
+          {
+            users.users.${cfg.user} = {
+              linger = lib.mkDefault true;
+              packages = [ cfg.package ];
+            };
+            networking.firewall.allowedTCPPorts = lib.mkIf cfg.openFirewall [ cfg.port ];
 
-    users.users.${cfg.user} = {
-      linger = lib.mkDefault true;
-      packages = [ cfg.package ];
-    };
-    networking.firewall.allowedTCPPorts = lib.mkIf cfg.openFirewall [ cfg.port ];
+            systemd.user.services.t3code = {
+              description = lib.mkDefault "T3 Code headless server";
+              wantedBy = [ "default.target" ];
+              unitConfig.ConditionUser = cfg.user;
+              enableDefaultPath = lib.mkDefault false;
 
-    systemd.user.services.t3code = {
-      description = lib.mkDefault "T3 Code headless server";
-      wantedBy = [ "default.target" ];
-      unitConfig.ConditionUser = cfg.user;
-      enableDefaultPath = lib.mkDefault false;
-
-      serviceConfig = {
-        Type = lib.mkDefault "exec";
-        WorkingDirectory = lib.mkDefault "%h";
-        ExecStart = lib.mkDefault (
-          utils.escapeSystemdExecArgs [
-            (lib.getExe cfg.package)
-            "serve"
-            "--host"
-            cfg.host
-            "--port"
-            cfg.port
-          ]
-        );
-        Restart = lib.mkDefault "on-failure";
-        RestartSec = lib.mkDefault "5s";
-      };
-    };
-  };
+              serviceConfig = {
+                Type = lib.mkDefault "exec";
+                WorkingDirectory = lib.mkDefault "%h";
+                ExecStart = lib.mkDefault (
+                  utils.escapeSystemdExecArgs [
+                    (lib.getExe cfg.package)
+                    "serve"
+                    "--host"
+                    cfg.host
+                    "--port"
+                    cfg.port
+                  ]
+                );
+                Restart = lib.mkDefault "on-failure";
+                RestartSec = lib.mkDefault "5s";
+              };
+            };
+          }
+        else
+          {
+            users.users.${cfg.user}.packages = [ cfg.package ];
+            launchd.daemons.t3code = (import ../lib/darwin-service.nix { inherit config lib pkgs; }) {
+              name = "t3code";
+              inherit (cfg) user;
+              command = [
+                (lib.getExe cfg.package)
+                "serve"
+                "--host"
+                cfg.host
+                "--port"
+                (toString cfg.port)
+              ];
+            };
+          }
+      )
+    ]
+  );
 }

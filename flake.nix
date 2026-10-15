@@ -1,9 +1,11 @@
 {
-  description = "NixOS modules for locally hosted coding agents";
+  description = "NixOS and nix-darwin modules for locally hosted coding agents";
 
-  inputs.llm-agents.url = "github:numtide/llm-agents.nix";
-  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
-  inputs.xs.url = "github:cablehead/xs";
+  inputs = {
+    llm-agents.url = "github:numtide/llm-agents.nix";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+    xs.url = "github:cablehead/xs";
+  };
 
   outputs =
     {
@@ -16,6 +18,7 @@
       systems = [
         "x86_64-linux"
         "aarch64-linux"
+        "aarch64-darwin"
       ];
       forAllSystems = nixpkgs.lib.genAttrs systems;
       codexModule = import ./modules/codex { inherit nixpkgs; };
@@ -24,21 +27,39 @@
       cliProxyApiModule = import ./modules/cli-proxy-api { inherit llm-agents; };
     in
     {
-      nixosModules.default = {
-        imports = [
-          ./modules/cache.nix
-          ./modules/skills.nix
-          codexModule
-          t3codeModule
-          xsModule
-          cliProxyApiModule
-        ];
+      nixosModules = {
+        default = {
+          imports = [
+            ./modules/cache.nix
+            ./modules/skills.nix
+            codexModule
+            xsModule
+            cliProxyApiModule
+          ];
+        };
+        codex-remote-control = codexModule;
+        t3code = t3codeModule;
+        skills = ./modules/skills.nix;
+        xs = xsModule;
+        cli-proxy-api = cliProxyApiModule;
       };
-      nixosModules.codex-remote-control = codexModule;
-      nixosModules.t3code = t3codeModule;
-      nixosModules.skills = ./modules/skills.nix;
-      nixosModules.xs = xsModule;
-      nixosModules.cli-proxy-api = cliProxyApiModule;
+
+      darwinModules = {
+        default = {
+          imports = [
+            ./modules/cache.nix
+            ./modules/skills.nix
+            codexModule
+            xsModule
+            cliProxyApiModule
+          ];
+        };
+        codex-remote-control = codexModule;
+        t3code = t3codeModule;
+        skills = ./modules/skills.nix;
+        xs = xsModule;
+        cli-proxy-api = cliProxyApiModule;
+      };
 
       formatter = forAllSystems (
         system:

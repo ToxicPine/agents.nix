@@ -3,15 +3,17 @@
   config,
   lib,
   pkgs,
+  options,
   ...
 }:
 
 let
+  isDarwin = options ? launchd;
   cfg = config.services.codex-remote-control;
 in
 {
   options.services.codex-remote-control = {
-    enable = lib.mkEnableOption "a systemd-supervised Codex server for SSH and remote control";
+    enable = lib.mkEnableOption "a supervised Codex server for SSH and remote control";
 
     user = lib.mkOption {
       type = lib.types.str;
@@ -28,32 +30,63 @@ in
 
   };
 
-  config = lib.mkIf cfg.enable {
-    assertions = [
+  config = lib.mkIf cfg.enable (
+    lib.mkMerge [
       {
-        assertion = cfg.user != "" && config.users.users.${cfg.user}.isNormalUser;
-        message = "services.codex-remote-control.user must name an existing normal user account.";
+        assertions = [
+          {
+            assertion =
+              cfg.user != ""
+              && (
+                if pkgs.stdenv.hostPlatform.isDarwin then
+                  config.users.users.${cfg.user}.home != null
+                else
+                  config.users.users.${cfg.user}.isNormalUser
+              );
+            message = "services.codex-remote-control.user must name an existing normal user account.";
+          }
+        ];
+
       }
-    ];
+      (
+        if !isDarwin then
+          {
+            users.users.${cfg.user} = {
+              linger = lib.mkDefault true;
+              packages = [ cfg.package ];
+            };
 
-    users.users.${cfg.user} = {
-      linger = lib.mkDefault true;
-      packages = [ cfg.package ];
-    };
+            systemd.user.services.codex-daemon = {
+              description = lib.mkDefault "Codex app server with SSH and remote control";
+              wantedBy = [ "default.target" ];
+              unitConfig.ConditionUser = cfg.user;
+              enableDefaultPath = lib.mkDefault false;
 
-    systemd.user.services.codex-daemon = {
-      description = lib.mkDefault "Codex app server with SSH and remote control";
-      wantedBy = [ "default.target" ];
-      unitConfig.ConditionUser = cfg.user;
-      enableDefaultPath = lib.mkDefault false;
-
-      serviceConfig = {
-        Type = lib.mkDefault "exec";
-        WorkingDirectory = lib.mkDefault "%h";
-        ExecStart = lib.mkDefault "${lib.getExe cfg.package} app-server --listen unix:// --remote-control";
-        Restart = lib.mkDefault "on-failure";
-        RestartSec = lib.mkDefault "5s";
-      };
-    };
-  };
+              serviceConfig = {
+                Type = lib.mkDefault "exec";
+                WorkingDirectory = lib.mkDefault "%h";
+                ExecStart = lib.mkDefault "${lib.getExe cfg.package} app-server --listen unix:// --remote-control";
+                Restart = lib.mkDefault "on-failure";
+                RestartSec = lib.mkDefault "5s";
+              };
+            };
+          }
+        else
+          {
+            users.users.${cfg.user}.packages = [ cfg.package ];
+            launchd.daemons.codex-daemon = (import ../lib/darwin-service.nix { inherit config lib pkgs; }) {
+              name = "codex-daemon";
+              inherit (cfg) user;
+              command = [
+                (lib.getExe cfg.package)
+                "app-server"
+                "--listen"
+                "unix://"
+                "--remote-control"
+              ];
+            };
+          }
+      )
+    ]
+  );
 }

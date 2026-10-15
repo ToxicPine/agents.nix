@@ -3,10 +3,12 @@
   config,
   lib,
   pkgs,
+  options,
   utils,
   ...
 }:
 let
+  isDarwin = options ? launchd;
   cfg = config.services.xs;
   host = if lib.hasInfix ":" cfg.host then "[${cfg.host}]" else cfg.host;
 in
@@ -14,8 +16,13 @@ in
   options.services.xs = {
     enable = lib.mkEnableOption "a cross.stream user service";
     sandbox = lib.mkOption {
-      type = lib.types.bool;
-      default = true;
+      type = if pkgs.stdenv.hostPlatform.isDarwin then lib.types.enum [ false ] else lib.types.bool;
+      default =
+        if pkgs.stdenv.hostPlatform.isDarwin then
+          throw "Set services.xs.sandbox = false explicitly on macOS."
+        else
+          true;
+      defaultText = lib.literalExpression "true on Linux; explicit false on macOS";
       description = "Apply systemd sandboxing restrictions to xs.";
     };
     user = lib.mkOption {
@@ -39,66 +46,102 @@ in
     };
   };
 
-  config = lib.mkIf cfg.enable {
-    assertions = [
+  config = lib.mkIf cfg.enable (
+    lib.mkMerge [
       {
-        assertion = cfg.user != "" && (config.users.users.${cfg.user}.isNormalUser or false);
-        message = "services.xs.user must name an existing normal user account.";
+        assertions = [
+          {
+            assertion = !pkgs.stdenv.hostPlatform.isDarwin || !cfg.sandbox;
+            message = "services.xs.sandbox requires Linux systemd sandboxing.";
+          }
+          {
+            assertion =
+              cfg.user != ""
+              && (
+                if pkgs.stdenv.hostPlatform.isDarwin then
+                  config.users.users.${cfg.user}.home != null
+                else
+                  config.users.users.${cfg.user}.isNormalUser or false
+              );
+            message = "services.xs.user must name an existing normal user account.";
+          }
+        ];
       }
-    ];
-    users.users.${cfg.user} = {
-      linger = lib.mkDefault true;
-      packages = [ cfg.package ];
-    };
-    systemd.user.services.xs = {
-      description = "Cross.stream store";
-      wantedBy = [ "default.target" ];
-      unitConfig.ConditionUser = cfg.user;
-      enableDefaultPath = lib.mkDefault false;
-      serviceConfig = lib.mapAttrs (_: lib.mkDefault) (
-        {
-          Type = "exec";
-          ExecStart = utils.escapeSystemdExecArgs [
-            (lib.getExe' cfg.package "xs")
-            "serve"
-            "./store"
-            "--expose"
-            "${host}:${toString cfg.port}"
-          ];
-          WorkingDirectory = "%S/xs";
-          StateDirectory = "xs";
-          Restart = "on-failure";
-          RestartSec = "5s";
-        }
-        // lib.optionalAttrs cfg.sandbox {
-          StateDirectoryMode = "0700";
-          UMask = "0077";
-          PrivateUsers = true;
-          PrivateDevices = true;
-          PrivateIPC = true;
-          PrivateTmp = "disconnected";
-          TemporaryFileSystem = "/:ro";
-          BindReadOnlyPaths = [ "/nix/store" ];
-          NoNewPrivileges = true;
-          CapabilityBoundingSet = "";
-          RestrictNamespaces = true;
-          RestrictSUIDSGID = true;
-          RestrictRealtime = true;
-          LockPersonality = true;
-          MemoryDenyWriteExecute = true;
-          SystemCallArchitectures = "native";
-          SystemCallFilter = [
-            "@system-service"
-            "~@privileged @resources @debug kill tkill tgkill rt_sigqueueinfo rt_tgsigqueueinfo pidfd_send_signal"
-          ];
-          SystemCallErrorNumber = "EPERM";
-          RestrictAddressFamilies = [
-            "AF_UNIX"
-            "AF_INET"
-            "AF_INET6"
-          ];
-        }
-      );
-    };
-  };
+      (
+        if !isDarwin then
+          {
+            users.users.${cfg.user} = {
+              linger = lib.mkDefault true;
+              packages = [ cfg.package ];
+            };
+            systemd.user.services.xs = {
+              description = "Cross.stream store";
+              wantedBy = [ "default.target" ];
+              unitConfig.ConditionUser = cfg.user;
+              enableDefaultPath = lib.mkDefault false;
+              serviceConfig = lib.mapAttrs (_: lib.mkDefault) (
+                {
+                  Type = "exec";
+                  ExecStart = utils.escapeSystemdExecArgs [
+                    (lib.getExe' cfg.package "xs")
+                    "serve"
+                    "./store"
+                    "--expose"
+                    "${host}:${toString cfg.port}"
+                  ];
+                  WorkingDirectory = "%S/xs";
+                  StateDirectory = "xs";
+                  Restart = "on-failure";
+                  RestartSec = "5s";
+                }
+                // lib.optionalAttrs cfg.sandbox {
+                  StateDirectoryMode = "0700";
+                  UMask = "0077";
+                  PrivateUsers = true;
+                  PrivateDevices = true;
+                  PrivateIPC = true;
+                  PrivateTmp = "disconnected";
+                  TemporaryFileSystem = "/:ro";
+                  BindReadOnlyPaths = [ "/nix/store" ];
+                  NoNewPrivileges = true;
+                  CapabilityBoundingSet = "";
+                  RestrictNamespaces = true;
+                  RestrictSUIDSGID = true;
+                  RestrictRealtime = true;
+                  LockPersonality = true;
+                  MemoryDenyWriteExecute = true;
+                  SystemCallArchitectures = "native";
+                  SystemCallFilter = [
+                    "@system-service"
+                    "~@privileged @resources @debug kill tkill tgkill rt_sigqueueinfo rt_tgsigqueueinfo pidfd_send_signal"
+                  ];
+                  SystemCallErrorNumber = "EPERM";
+                  RestrictAddressFamilies = [
+                    "AF_UNIX"
+                    "AF_INET"
+                    "AF_INET6"
+                  ];
+                }
+              );
+            };
+          }
+        else
+          {
+            users.users.${cfg.user}.packages = [ cfg.package ];
+            launchd.daemons.xs = (import ../lib/darwin-service.nix { inherit config lib pkgs; }) {
+              name = "xs";
+              inherit (cfg) user;
+              command = [
+                (lib.getExe' cfg.package "xs")
+                "serve"
+                "./store"
+                "--expose"
+                "${host}:${toString cfg.port}"
+              ];
+              directory = "${config.users.users.${cfg.user}.home}/Library/Application Support/xs";
+            };
+          }
+      )
+    ]
+  );
 }
