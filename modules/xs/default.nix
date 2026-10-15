@@ -31,7 +31,24 @@ in
     };
     package = lib.mkOption {
       type = lib.types.package;
-      default = xs.packages.${pkgs.stdenv.hostPlatform.system}.default;
+      default =
+        let
+          package = xs.packages.${pkgs.stdenv.hostPlatform.system}.default;
+          buildPkgs = xs.inputs.nixpkgs.legacyPackages.${pkgs.stdenv.hostPlatform.system};
+          bindgen = old: {
+            nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [ buildPkgs.rustPlatform.bindgenHook ];
+          };
+        in
+        if isDarwin then
+          package.overrideAttrs (
+            old:
+            bindgen old
+            // {
+              cargoArtifacts = old.cargoArtifacts.overrideAttrs bindgen;
+            }
+          )
+        else
+          package;
       defaultText = lib.literalExpression "agents.nix's pinned xs package";
     };
     host = lib.mkOption {
