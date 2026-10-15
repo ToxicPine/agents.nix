@@ -13,6 +13,7 @@
 let
   userHome = config.users.users.${user}.home;
   workDir = if directory == null then userHome else directory;
+  logDir = "${userHome}/Library/Logs/agents.nix";
 in
 {
   environment = {
@@ -22,6 +23,8 @@ in
   script = ''
     set -eu
     umask 077
+    ${pkgs.coreutils}/bin/mkdir -p ${lib.escapeShellArg logDir}
+    exec >> ${lib.escapeShellArg "${logDir}/${name}.log"} 2>&1
     ${pkgs.coreutils}/bin/mkdir -p ${lib.escapeShellArg workDir}
     ${lib.optionalString (
       directory != null
@@ -35,8 +38,6 @@ in
     RunAtLoad = true;
     KeepAlive.SuccessfulExit = false;
     ThrottleInterval = 5;
-    StandardOutPath = "/var/log/${name}.log";
-    StandardErrorPath = "/var/log/${name}.log";
     Umask = 63;
   };
 }
