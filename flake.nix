@@ -22,7 +22,7 @@
       ];
       forAllSystems = nixpkgs.lib.genAttrs systems;
       codexModule = import ./modules/codex { inherit nixpkgs; };
-      t3codeModule = import ./modules/t3code { inherit llm-agents; };
+      t3codeModule = import ./modules/t3code { inherit llm-agents nixpkgs; };
       xsModule = import ./modules/xs { inherit xs; };
       cliProxyApiModule = import ./modules/cli-proxy-api { inherit llm-agents; };
     in

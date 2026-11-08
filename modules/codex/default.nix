@@ -12,6 +12,7 @@ let
   cfg = config.services.codex-remote-control;
 in
 {
+  imports = [ ../resources ];
   options.services.codex-remote-control = {
     enable = lib.mkEnableOption "a supervised Codex server for SSH and remote control";
 
@@ -51,6 +52,10 @@ in
       (
         if !isDarwin then
           {
+            services.codex-executor = {
+              enable = lib.mkDefault true;
+              package = cfg.package;
+            };
             users.users.${cfg.user} = {
               linger = lib.mkDefault true;
               packages = [ cfg.package ];
@@ -68,6 +73,9 @@ in
                 ExecStart = lib.mkDefault "${lib.getExe cfg.package} app-server --listen unix:// --remote-control";
                 Restart = lib.mkDefault "on-failure";
                 RestartSec = lib.mkDefault "5s";
+                CPUWeight = lib.mkDefault 1000;
+                IOWeight = lib.mkDefault 1000;
+                MemoryLow = lib.mkDefault "2G";
               };
             };
           }

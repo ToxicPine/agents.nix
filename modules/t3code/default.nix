@@ -1,4 +1,4 @@
-{ llm-agents }:
+{ llm-agents, nixpkgs }:
 {
   config,
   lib,
@@ -12,6 +12,7 @@ let
   cfg = config.services.t3code;
 in
 {
+  imports = [ ../resources ];
   options.services.t3code = {
     enable = lib.mkEnableOption "a supervised headless T3 Code server";
 
@@ -85,11 +86,25 @@ in
       (
         if !isDarwin then
           {
+            services.codex-executor = {
+              enable = lib.mkDefault true;
+              package = lib.mkDefault nixpkgs.legacyPackages.${pkgs.stdenv.hostPlatform.system}.codex;
+            };
             users.users.${cfg.user} = {
               linger = lib.mkDefault true;
-              packages = [ cfg.package ];
+              packages = [
+                cfg.package
+                config.services.codex-executor.package
+              ];
             };
             networking.firewall.allowedTCPPorts = lib.mkIf cfg.openFirewall [ cfg.port ];
+
+            # T3 places provider app servers below this slice. Tool executors
+            # live alongside it in app-codexjobs.slice.
+            systemd.user.slices.app-t3code.sliceConfig = {
+              CPUWeight = lib.mkDefault 1000;
+              IOWeight = lib.mkDefault 1000;
+            };
 
             systemd.user.services.t3code = {
               description = lib.mkDefault "T3 Code headless server";
@@ -112,6 +127,9 @@ in
                 );
                 Restart = lib.mkDefault "on-failure";
                 RestartSec = lib.mkDefault "5s";
+                CPUWeight = lib.mkDefault 1000;
+                IOWeight = lib.mkDefault 1000;
+                MemoryLow = lib.mkDefault "2G";
               };
             };
           }
