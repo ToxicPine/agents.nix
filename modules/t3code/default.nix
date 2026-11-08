@@ -129,7 +129,6 @@ in
                 RestartSec = lib.mkDefault "5s";
                 CPUWeight = lib.mkDefault 1000;
                 IOWeight = lib.mkDefault 1000;
-                MemoryLow = lib.mkDefault "2G";
               };
             };
           }

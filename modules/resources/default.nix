@@ -8,6 +8,11 @@
 let
   cfg = config.services.codex-executor;
   isDarwin = options ? launchd;
+  users = lib.unique (
+    lib.optional (config.services.codex-remote-control.enable or false
+    ) config.services.codex-remote-control.user
+    ++ lib.optional (config.services.t3code.enable or false) config.services.t3code.user
+  );
   launcher = pkgs.writeShellScript "codex-executor" ''
     exec ${pkgs.systemd}/bin/systemd-run --user --scope --quiet --collect \
       --slice=app-codexjobs.slice --property=OOMPolicy=stop \
@@ -35,6 +40,18 @@ in
   };
   config = lib.mkIf (cfg.enable && !isDarwin) {
     environment.etc."codex/environments.toml".source = environments;
+    systemd.tmpfiles.rules = lib.concatMap (
+      name:
+      let
+        user = config.users.users.${name};
+        home = builtins.toJSON "${user.home}/.codex";
+        link = builtins.toJSON "${user.home}/.codex/environments.toml";
+      in
+      [
+        "d ${home} 0700 ${name} ${user.group} - -"
+        "L+ ${link} - ${name} ${user.group} - /etc/codex/environments.toml"
+      ]
+    ) users;
     systemd.user.slices.app-codexjobs = {
       description = "Aggregate budget for Codex executors and tool processes";
       sliceConfig = {

@@ -170,6 +170,8 @@ in
           cli-proxy-api = { };
         };
 
+        systemd.slices.system.sliceConfig.MemoryLow = lib.mkDefault "256M";
+
         systemd.services.cli-proxy-api = {
           description = "Proxy that provides OpenAI/Gemini/Claude/Codex/Grok compatible API interfaces";
           after = [ "network-online.target" ];
@@ -192,6 +194,9 @@ in
             ];
             Restart = "on-failure";
             RestartSec = 5;
+            CPUWeight = lib.mkDefault 1000;
+            IOWeight = lib.mkDefault 1000;
+            MemoryLow = lib.mkDefault "256M";
             LoadCredential = secretsReplacement.credentials;
             EnvironmentFile = lib.mkIf (cfg.environmentFile != null) [ cfg.environmentFile ];
 
