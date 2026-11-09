@@ -24,9 +24,16 @@ in
 
     package = lib.mkOption {
       type = lib.types.package;
-      default = llm-agents.packages.${pkgs.stdenv.hostPlatform.system}.t3code.unwrapped;
-      defaultText = lib.literalExpression "agents.nix's pinned llm-agents T3 Code CLI package";
-      description = "T3 Code package providing the t3 executable. The default package uses agents from the inherited PATH instead of bundling provider CLIs.";
+      default = import ./package.nix {
+        upstream = llm-agents.packages.${pkgs.stdenv.hostPlatform.system}.t3code.unwrapped;
+      };
+      defaultText = lib.literalExpression "agents.nix's pinned T3 Code CLI with host-managed resource policy";
+      description = ''
+        T3 Code package providing the t3 executable. The default package uses
+        agents from the inherited PATH instead of bundling provider CLIs, and
+        leaves systemd resource policy alone unless explicitly configured through
+        T3CODE_AGENT_SLICE_* environment variables. See modules/t3code/README.md.
+      '';
     };
 
     host = lib.mkOption {

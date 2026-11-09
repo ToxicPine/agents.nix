@@ -1,0 +1,242 @@
+--- a/apps/server/src/process/agentScope.ts
++++ b/apps/server/src/process/agentScope.ts
+@@ -1,6 +1,5 @@
+-// @effect-diagnostics nodeBuiltinImport:off -- unit names and RAM size come from the host.
++// @effect-diagnostics nodeBuiltinImport:off -- unit names come from the host.
+ import * as NodeCrypto from "node:crypto";
+-import * as NodeOS from "node:os";
+ 
+ import {
+   AgentScope,
+@@ -21,31 +20,32 @@
+ const AGENT_SLICE = "app-t3code-agents.slice";
+ // Owns every agent slice and competes with the server's unit or scope under app.slice.
+ const AGENTS_PARENT_SLICE = "app-t3code.slice";
+-// Low weights yield CPU and disk to the server under contention, where the user manager
+-// has those controllers: current systemd delegates cpu, rarely io. TasksMax keeps agents
+-// below logind's 33% per-user task limit, leaving forks for the server.
+-const AGENTS_PARENT_PROPERTIES = ["CPUWeight=10", "IOWeight=10", "TasksMax=25%"];
++const AGENT_MEMORY_PROPERTIES = {
++  MemoryHigh: "T3CODE_AGENT_SLICE_MEMORY_HIGH",
++  MemoryMax: "T3CODE_AGENT_SLICE_MEMORY_MAX",
++};
++const AGENTS_PARENT_PROPERTIES = {
++  CPUWeight: "T3CODE_AGENT_SLICE_CPU_WEIGHT",
++  IOWeight: "T3CODE_AGENT_SLICE_IO_WEIGHT",
++  TasksMax: "T3CODE_AGENT_SLICE_TASKS_MAX",
++};
++
++function configuredProperties(
++  environment: NodeJS.ProcessEnv,
++  variables: Readonly<Record<string, string>>,
++): Array<string> {
++  return Object.entries(variables).flatMap(([property, variable]) => {
++    const value = environment[variable]?.trim();
++    if (!value || /^(null|unset)$/i.test(value)) return [];
++    return [`${property}=${value}`];
++  });
++}
+ 
+ export function ownedAgentSlice(stateDir: string): string {
+   const hash = NodeCrypto.createHash("sha256").update(stateDir).digest("hex").slice(0, 12);
+   return `app-t3code-agents-${hash}.slice`;
+ }
+ 
+-const GiB = 1024 ** 3;
+-
+-/**
+- * Agents together leave about 6 GB free before they are throttled and 4 GB
+- * before the kernel kills one, so the server, sshd, and tailscaled keep
+- * working. Small machines still give agents at least half of RAM before
+- * throttling and three quarters before a kill.
+- */
+-function agentSliceMemoryLimits(totalBytes: number) {
+-  return {
+-    high: Math.max(totalBytes - 6 * GiB, Math.floor(totalBytes / 2)),
+-    max: Math.max(totalBytes - 4 * GiB, Math.floor(totalBytes * 0.75)),
+-  };
+-}
+-
+ export interface ScopeState {
+   readonly loadState: string;
+   readonly activeState: string;
+@@ -183,6 +183,7 @@
+         slice: string,
+         properties: ReadonlyArray<string>,
+       ) {
++        if (properties.length === 0) return;
+         const result = yield* run(systemctl, [
+           "--user",
+           "set-property",
+@@ -198,12 +199,14 @@
+           });
+         }
+       });
+-      const limits = agentSliceMemoryLimits(NodeOS.totalmem());
+-      yield* setProperties(AGENT_SLICE, [`MemoryHigh=${limits.high}`, `MemoryMax=${limits.max}`]);
+-      yield* setProperties(AGENTS_PARENT_SLICE, AGENTS_PARENT_PROPERTIES);
++      const memoryProperties = configuredProperties(hostEnvironment, AGENT_MEMORY_PROPERTIES);
++      const parentProperties = configuredProperties(hostEnvironment, AGENTS_PARENT_PROPERTIES);
++      yield* setProperties(AGENT_SLICE, memoryProperties);
++      yield* setProperties(AGENTS_PARENT_SLICE, parentProperties);
+       yield* Effect.logInfo("Agent scopes are on", {
+         slice: AGENT_SLICE,
+-        ...limits,
++        memoryProperties,
++        parentProperties,
+         oomPolicy: supportsOomPolicy,
+       });
+       return {
+--- a/apps/server/src/process/agentScope.test.ts
++++ b/apps/server/src/process/agentScope.test.ts
+@@ -55,7 +55,12 @@
+   {
+     oomPolicy = true,
+     stopFails = false,
+-  }: { readonly oomPolicy?: boolean; readonly stopFails?: boolean } = {},
++    environment = {},
++  }: {
++    readonly oomPolicy?: boolean;
++    readonly stopFails?: boolean;
++    readonly environment?: NodeJS.ProcessEnv;
++  } = {},
+ ) =>
+   Effect.gen(function* () {
+     const bin = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-agent-scope-"));
+@@ -105,7 +110,11 @@
+     const scope = yield* make.pipe(
+       Effect.provideService(ProcessRunner.ProcessRunner, runner),
+       Effect.provideService(HostProcess.Platform, "linux"),
+-      Effect.provideService(HostProcess.Environment, { PATH: bin, XDG_RUNTIME_DIR: "/run/user/1" }),
++      Effect.provideService(HostProcess.Environment, {
++        PATH: bin,
++        XDG_RUNTIME_DIR: "/run/user/1",
++        ...environment,
++      }),
+       Effect.provideService(FileSystem.FileSystem, {
+         ...fileSystem,
+         readFileString: (path, encoding) =>
+@@ -280,34 +289,101 @@
+     ),
+   );
+ 
+-  it.effect("caps agent memory and yields CPU, disk, and tasks to the server", () =>
++  it.effect("leaves host resource policy untouched when no overrides are configured", () =>
+     withFakeSystemd(({ scope, calls }) =>
+       Effect.gen(function* () {
+-        yield* scope.wrap({ command: "agent", args: [], name: "t", threadId: "a" });
+-        const setProperties = calls.filter(([, verb]) => verb === "set-property");
+-        expect(setProperties).toEqual([
+-          [
+-            "--user",
+-            "set-property",
+-            "--runtime",
+-            "app-t3code-agents.slice",
+-            expect.stringMatching(/^MemoryHigh=\d+$/),
+-            expect.stringMatching(/^MemoryMax=\d+$/),
+-          ],
+-          [
+-            "--user",
+-            "set-property",
+-            "--runtime",
+-            "app-t3code.slice",
+-            "CPUWeight=10",
+-            "IOWeight=10",
+-            "TasksMax=25%",
+-          ],
+-        ]);
++        const agent = yield* scope.wrap({ command: "agent", args: [], name: "t", threadId: "a" });
++        expect(calls.filter(([, verb]) => verb === "set-property")).toEqual([]);
++        expect(agent.args).toContain("--property=OOMPolicy=stop");
++        expect(agent.args).toContain("--property=Delegate=yes");
+       }),
+     ),
+   );
+ 
++  it.effect("applies explicit overrides once to their respective slices", () =>
++    withFakeSystemd(
++      ({ scope, calls }) =>
++        Effect.gen(function* () {
++          yield* scope.wrap({ command: "agent", args: [], name: "t", threadId: "a" });
++          yield* scope.wrap({ command: "agent", args: [], name: "t", threadId: "b" });
++          expect(calls.filter(([, verb]) => verb === "set-property")).toEqual([
++            [
++              "--user",
++              "set-property",
++              "--runtime",
++              "app-t3code-agents.slice",
++              "MemoryHigh=8G",
++              "MemoryMax=75%",
++            ],
++            [
++              "--user",
++              "set-property",
++              "--runtime",
++              "app-t3code.slice",
++              "CPUWeight=1000",
++              "IOWeight=500",
++              "TasksMax=4096",
++            ],
++          ]);
++        }),
++      {
++        environment: {
++          T3CODE_AGENT_SLICE_MEMORY_HIGH: "8G",
++          T3CODE_AGENT_SLICE_MEMORY_MAX: "75%",
++          T3CODE_AGENT_SLICE_CPU_WEIGHT: "1000",
++          T3CODE_AGENT_SLICE_IO_WEIGHT: "500",
++          T3CODE_AGENT_SLICE_TASKS_MAX: "4096",
++        },
++      },
++    ),
++  );
++
++  it.effect.each(["", "  ", "null", "NULL", "unset"])(
++    "does not generate overrides for an explicitly unset value %j",
++    (value) =>
++      withFakeSystemd(
++        ({ scope, calls }) =>
++          Effect.gen(function* () {
++            yield* scope.wrap({ command: "agent", args: [], name: "t", threadId: "a" });
++            expect(calls.filter(([, verb]) => verb === "set-property")).toEqual([]);
++          }),
++        {
++          environment: {
++            T3CODE_AGENT_SLICE_MEMORY_HIGH: value,
++            T3CODE_AGENT_SLICE_MEMORY_MAX: value,
++            T3CODE_AGENT_SLICE_CPU_WEIGHT: value,
++            T3CODE_AGENT_SLICE_IO_WEIGHT: value,
++            T3CODE_AGENT_SLICE_TASKS_MAX: value,
++          },
++        },
++      ),
++  );
++
++  it.effect("sets only the selected property and preserves native systemd values", () =>
++    withFakeSystemd(
++      ({ scope, calls }) =>
++        Effect.gen(function* () {
++          yield* scope.wrap({ command: "agent", args: [], name: "t", threadId: "a" });
++          expect(calls.filter(([, verb]) => verb === "set-property")).toEqual([
++            [
++              "--user",
++              "set-property",
++              "--runtime",
++              "app-t3code-agents.slice",
++              "MemoryMax=infinity",
++            ],
++          ]);
++        }),
++      {
++        environment: {
++          T3CODE_AGENT_SLICE_MEMORY_HIGH: "null",
++          T3CODE_AGENT_SLICE_MEMORY_MAX: " infinity ",
++          T3CODE_AGENT_SLICE_CPU_WEIGHT: "",
++        },
++      },
++    ),
++  );
++
+   it.effect("stops agents a killed server left before the first launch", () =>
+     withFakeSystemd(({ scope, units, calls, stateDir }) =>
+       Effect.gen(function* () {

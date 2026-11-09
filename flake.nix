@@ -25,8 +25,22 @@
       t3codeModule = import ./modules/t3code { inherit llm-agents nixpkgs; };
       xsModule = import ./modules/xs { inherit xs; };
       cliProxyApiModule = import ./modules/cli-proxy-api { inherit llm-agents; };
+      t3codePackages = forAllSystems (
+        system:
+        import ./modules/t3code/package.nix {
+          upstream = llm-agents.packages.${system}.t3code.unwrapped;
+        }
+      );
     in
     {
+      packages = forAllSystems (system: {
+        t3code = t3codePackages.${system};
+      });
+
+      checks = forAllSystems (system: {
+        t3code = t3codePackages.${system};
+      });
+
       nixosModules = {
         default = {
           imports = [
