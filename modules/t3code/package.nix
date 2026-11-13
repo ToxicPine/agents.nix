@@ -2,6 +2,21 @@
 upstream.overrideAttrs (old: {
   patches = (old.patches or [ ]) ++ [ ./patches/host-managed-resources.patch ];
 
+  preCheck =
+    (old.preCheck or "")
+    + (
+      if upstream.stdenv.hostPlatform.isLinux then
+        ''
+          # effect-tsgo bundles native checkers with non-Nix ELF interpreters.
+          tsgoPlatform=linux-${upstream.stdenv.hostPlatform.node.arch}
+          for checker in node_modules/.pnpm/@effect+tsgo-"$tsgoPlatform"@*/node_modules/@effect/tsgo-"$tsgoPlatform"; do
+            [[ ! -d "$checker" ]] || autoPatchelf "$checker"
+          done
+        ''
+      else
+        ""
+    );
+
   doCheck = true;
   checkPhase = ''
     runHook preCheck
